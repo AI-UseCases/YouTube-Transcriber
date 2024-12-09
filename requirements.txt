@@ -1,0 +1,7 @@
+numpy==2.2.0
+pydub==0.25.1
+silero_vad==5.1.2
+streamlit==1.40.2
+torch==2.5.1
+transformers==4.46.3
+yt_dlp==2024.12.6
