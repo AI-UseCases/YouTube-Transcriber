@@ -2,12 +2,14 @@ import random
 import streamlit as st
 import io
 import os
+
 from transformers import pipeline
 import torch
 import yt_dlp
 from silero_vad import load_silero_vad, get_speech_timestamps
 import numpy as np
 import pydub
+from litellm import completion
 
 # --- Model Loading and Caching ---
 @st.cache_resource
@@ -291,8 +293,9 @@ def process_transcription(video_url, vad_sensitivity, batch_size, transcriber, v
         start_time = format_seconds(chunk['start'])
         end_time = format_seconds(chunk['end'])
         full_transcription += f"[{start_time} - {end_time}]: {chunk['text'].strip()}\n\n"
+    formatted_transcription = format_transcript(full_transcription)
 
-    return full_transcription, audio_data, audio_format, info
+    return full_transcription, formatted_transcription, audio_data, audio_format, info
 
 def format_seconds(seconds):
     """Formats seconds into HH:MM:SS string."""
@@ -327,18 +330,26 @@ def download_video(video_url, video_format):
         st.error(f"Error during video download: {e}")
         return None, None, None
 
-import random
-import streamlit as st
-import io
-import os
-from transformers import pipeline
-import torch
-import yt_dlp
-from silero_vad import load_silero_vad, get_speech_timestamps
-import numpy as np
-import pydub
+def format_transcript(input_transcription):
+    
 
-# ... (rest of your code, including model loading, audio functions, etc.)
+    # os.environ["GEMINI_API_KEY"] = "..."
+
+    sys_prompt = """
+    Video Transcription Formatting
+
+    As an LLM formatting provided video transcriptions (in any language), transform spoken language into clear, readable text. Prioritize readability, consistency, and context, adapting to the specific language conventions. **Do not hallucinate or add any information not present in the original transcript.**
+
+    *   **Sentences:** Restructure long, rambling sentences; correct grammatical errors *while preserving the original meaning*; use proper punctuation appropriate for the language.
+    *   **Reading:** Italicize/quote read text; clearly separate from explanations.
+    *   **Repetitions:** Remove unnecessary repetitions unless for emphasis.
+    """.strip()
+    messages = [{"content": sys_prompt, "role": "system"},
+                 {"content": f"Format the following video transcription: {input_transcription}", "role": "user"}]
+
+    response = completion(model="gemini/gemini-2.0-flash-exp", messages=messages)
+    formatted_text = response.choices[0].message.content
+    return formatted_text
 
 def main():
     """Main function to run the Streamlit application."""
@@ -360,9 +371,9 @@ def main():
     # Call setup_ui() to get UI element values
     video_url, language, batch_size, transcribe_option, download_audio_option, download_video_option, process_button, vad_sensitivity, audio_format, video_format = setup_ui()
 
-    transcription_output = st.empty()
+    # transcription_output = st.empty()
     if st.session_state.full_transcription:
-        transcription_output.text_area("Transcription:", value=st.session_state.full_transcription, height=300, key=random.random())
+        st.text_area("Transcription:", value=st.session_state.full_transcription, height=300, key=random.random())
 
     if process_button:
         st.session_state.full_transcription = None
@@ -377,9 +388,12 @@ def main():
             return
 
         if transcribe_option:
-            st.session_state.full_transcription, st.session_state.audio_data, st.session_state.audio_format, st.session_state.info = process_transcription(video_url, vad_sensitivity, batch_size, transcriber, vad_model, audio_format, language)
+            st.session_state.full_transcription, st.session_state.formatted_transcription, st.session_state.audio_data, st.session_state.audio_format, st.session_state.info = process_transcription(video_url, vad_sensitivity, batch_size, transcriber, vad_model, audio_format, language)
             if st.session_state.full_transcription:
-                transcription_output.text_area("Transcription:", value=st.session_state.full_transcription, height=300, key=random.random())
+                st.text_area("Transcription:", value=st.session_state.full_transcription, height=300, key=random.random())
+            if st.session_state.formatted_transcription:
+                st.text_area("Formatted Transcription:", value=st.session_state.formatted_transcription, height=300, key=random.random())
+
 
         if download_audio_option:
             if st.session_state.audio_data is None or st.session_state.audio_format is None or st.session_state.info is None:
