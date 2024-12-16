@@ -1,4 +1,4 @@
-import random
+import uuid
 import streamlit as st
 import io
 import os
@@ -10,6 +10,9 @@ from silero_vad import load_silero_vad, get_speech_timestamps
 import numpy as np
 import pydub
 from litellm import completion
+
+# --- Language List ---
+LANGUAGES = ['english', 'chinese', 'german', 'spanish', 'russian', 'korean', 'french', 'japanese', 'portuguese', 'turkish', 'polish', 'catalan', 'dutch', 'arabic', 'swedish', 'italian', 'indonesian', 'hindi', 'finnish', 'vietnamese', 'hebrew', 'ukrainian', 'greek', 'malay', 'czech', 'romanian', 'danish', 'hungarian', 'tamil', 'norwegian', 'thai', 'urdu', 'croatian', 'bulgarian', 'lithuanian', 'latin', 'maori', 'malayalam', 'welsh', 'slovak', 'telugu', 'persian', 'latvian', 'bengali', 'serbian', 'azerbaijani', 'slovenian', 'kannada', 'estonian', 'macedonian', 'breton', 'basque', 'icelandic', 'armenian', 'nepali', 'mongolian', 'bosnian', 'kazakh', 'albanian', 'swahili', 'galician', 'marathi', 'punjabi', 'sinhala', 'khmer', 'shona', 'yoruba', 'somali', 'afrikaans', 'occitan', 'georgian', 'belarusian', 'tajik', 'sindhi', 'gujarati', 'amharic', 'yiddish', 'lao', 'uzbek', 'faroese', 'haitian creole', 'pashto', 'turkmen', 'nynorsk', 'maltese', 'sanskrit', 'luxembourgish', 'myanmar', 'tibetan', 'tagalog', 'malagasy', 'assamese', 'tatar', 'hawaiian', 'lingala', 'hausa', 'bashkir', 'javanese', 'sundanese', 'cantonese', 'burmese', 'valencian', 'flemish', 'haitian', 'letzeburgesch', 'pushto', 'panjabi', 'moldavian', 'moldovan', 'sinhalese', 'castilian', 'mandarin']
 
 # --- Model Loading and Caching ---
 @st.cache_resource
@@ -75,8 +78,11 @@ def download_and_convert_audio(video_url, audio_format="wav"):
 def update_download_progress(d, status_message):
     """Updates the download progress in the Streamlit UI."""
     if d['status'] == 'downloading':
-        p = round(d['downloaded_bytes'] / d['total_bytes'] * 100)
-        status_message.text(f"Downloading: {p}%")
+        if 'total_bytes' in d and d['total_bytes'] is not None:
+            p = round(d['downloaded_bytes'] / d['total_bytes'] * 100)
+            status_message.text(f"Downloading: {p}%")
+        else:
+            status_message.text("Downloading...")
 
 @st.cache_data
 def split_audio_by_vad(audio_data: bytes, ext: str, _vad_model, sensitivity: float, max_duration: int = 30, return_seconds: bool = True):
@@ -210,41 +216,47 @@ def transcribe_batch(batch, _transcriber, language=None):
 def setup_ui():
     """Sets up the Streamlit user interface."""
     st.title("YouTube Video Transcriber")
+    st.caption("This app allows you to transcribe YouTube videos and format the transcription using a large language model. You can also download the audio and video.")
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        transcribe_option = st.checkbox("Transcribe", value=True)
-    with col2:
-        download_audio_option = st.checkbox("Download Audio", value=False)
-    with col3:
-        download_video_option = st.checkbox("Download Video", value=False)
-    with col4:
-        pass
+    with st.sidebar:
+        st.header("Input")
+        video_url = st.text_input("YouTube Video Link:", key="video_url", help="Enter the URL of the YouTube video you want to transcribe.")
 
-    video_url = st.text_input("YouTube Video Link:", key="video_url")
-    language = st.text_input("Language (two-letter code, e.g., 'en', 'es', leave empty for auto-detection):", max_chars=2, key="language")
-    batch_size = st.number_input("Batch Size", min_value=1, value=2, key="batch_size")
-    vad_sensitivity = st.slider("VAD Sensitivity", min_value=0.0, max_value=1.0, value=0.1, step=0.05, key="vad_sensitivity")
-    
-    # Use session state to manage audio format selection and reset
-    if 'reset_audio_format' not in st.session_state:
-        st.session_state.reset_audio_format = False
+        st.header("Options")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            transcribe_option = st.checkbox("Transcribe", value=True, help="Transcribe the audio of the video.")
+        with col2:
+            download_audio_option = st.checkbox("Download Audio", value=False, help="Download the audio of the video.")
+        with col3:
+            download_video_option = st.checkbox("Download Video", value=False, help="Download the video.")
+        with col4:
+            format_option = st.checkbox("Format Text", value=True, help="Format the transcription for better readability using a language model.")
 
-    if 'audio_format' not in st.session_state or st.session_state.reset_audio_format:
-        st.session_state.audio_format = "wav"  # Default value
-        st.session_state.reset_audio_format = False
+        with st.expander("Advanced Settings"):
+            language = st.selectbox("Language", options= ["Auto-Detect"] + LANGUAGES, format_func=lambda x: x.title(), help="Select the language of the audio for better transcription accuracy. Select 'Auto-Detect' to let the model determine the language.")
+            batch_size = st.number_input("Batch Size", min_value=1, value=2, key="batch_size", help="The number of audio chunks to process at once during transcription.")
+            vad_sensitivity = st.slider("VAD Sensitivity", min_value=0.0, max_value=1.0, value=0.1, step=0.05, key="vad_sensitivity", help="Adjust the sensitivity of the Voice Activity Detection (VAD) model. Higher values mean more sensitive to speech.")
 
-    audio_format = st.selectbox("Audio Format", ["wav", "mp3", "ogg", "flac"], key="audio_format_widget", index=["wav", "mp3", "ogg", "flac"].index(st.session_state.audio_format))
-    st.session_state.audio_format = audio_format
-    
-    if download_video_option:
-        video_format = st.selectbox("Video Format", ["mp4", "webm"], index=0, key="video_format")
-    else:
-        video_format = "mp4"
+            # Use session state to manage audio format selection and reset
+            if 'reset_audio_format' not in st.session_state:
+                st.session_state.reset_audio_format = False
 
-    process_button = st.button("Process")
+            if 'audio_format' not in st.session_state or st.session_state.reset_audio_format:
+                st.session_state.audio_format = "wav"  # Default value
+                st.session_state.reset_audio_format = False
 
-    return video_url, language, batch_size, transcribe_option, download_audio_option, download_video_option, process_button, vad_sensitivity, audio_format, video_format
+            audio_format = st.selectbox("Audio Format", ["wav", "mp3", "ogg", "flac"], key="audio_format_widget", index=["wav", "mp3", "ogg", "flac"].index(st.session_state.audio_format), help="Select the desired audio format for download.")
+            st.session_state.audio_format = audio_format
+            
+            if download_video_option:
+                video_format = st.selectbox("Video Format", ["mp4", "webm"], index=0, key="video_format", help="Select the desired video format for download.")
+            else:
+                video_format = "mp4"
+
+        process_button = st.button("Process")
+
+    return video_url, language, batch_size, transcribe_option, download_audio_option, download_video_option, process_button, vad_sensitivity, audio_format, video_format, format_option
 
 @st.cache_resource
 def initialize_models():
@@ -278,12 +290,12 @@ def process_transcription(video_url, vad_sensitivity, batch_size, transcriber, v
 
     total_chunks = len(chunks)
     transcriptions = []
-    progress_bar = st.progress(0)
+    progress_bar = st.progress(0, "Transcribing...")
     for i in range(0, total_chunks, batch_size):
         batch = chunks[i:i + batch_size]
         batch_transcriptions = transcribe_batch(batch, transcriber, language)
         transcriptions.extend(batch_transcriptions)
-        progress_bar.progress((i + len(batch)) / total_chunks)
+        progress_bar.progress((i + len(batch)) / total_chunks, f"Transcribing... {i + len(batch)}/{total_chunks} chunks done")
 
     progress_bar.empty()
     st.success("Transcription complete!")
@@ -293,9 +305,8 @@ def process_transcription(video_url, vad_sensitivity, batch_size, transcriber, v
         start_time = format_seconds(chunk['start'])
         end_time = format_seconds(chunk['end'])
         full_transcription += f"[{start_time} - {end_time}]: {chunk['text'].strip()}\n\n"
-    formatted_transcription = format_transcript(full_transcription)
 
-    return full_transcription, formatted_transcription, audio_data, audio_format, info
+    return full_transcription, audio_data, audio_format, info
 
 def format_seconds(seconds):
     """Formats seconds into HH:MM:SS string."""
@@ -331,18 +342,21 @@ def download_video(video_url, video_format):
         return None, None, None
 
 def format_transcript(input_transcription):
-    
+    """Formats the transcription using the Gemini large language model."""
 
     # os.environ["GEMINI_API_KEY"] = "..."
 
     sys_prompt = """
-    Video Transcription Formatting
-
-    As an LLM formatting provided video transcriptions (in any language), transform spoken language into clear, readable text. Prioritize readability, consistency, and context, adapting to the specific language conventions. **Do not hallucinate or add any information not present in the original transcript.**
-
-    *   **Sentences:** Restructure long, rambling sentences; correct grammatical errors *while preserving the original meaning*; use proper punctuation appropriate for the language.
-    *   **Reading:** Italicize/quote read text; clearly separate from explanations.
-    *   **Repetitions:** Remove unnecessary repetitions unless for emphasis.
+    *   Format the provided video transcription as a polished piece of written text.
+*   **The output must be in the same language as the input; do not translate it.**
+*   Focus on clarity, readability, and consistency, adhering to the conventions of that specific language.
+*   Restructure sentences for improved flow and correct grammatical errors.
+*   **Edits should strictly enhance readability without altering the original meaning or nuances of the raw transcription.**
+*   Italicize or quote any text that is read aloud, clearly distinguishing it from the surrounding explanations.
+*   Eliminate unnecessary repetitions unless they are used for emphasis.
+*   **Do not add any information not present in the original transcript.**
+*   **Do not remove timestamps.**
+*   **Output only the formatted transcription.**
     """.strip()
     messages = [{"content": sys_prompt, "role": "system"},
                  {"content": f"Format the following video transcription: {input_transcription}", "role": "user"}]
@@ -353,10 +367,12 @@ def format_transcript(input_transcription):
 
 def main():
     """Main function to run the Streamlit application."""
-
+    st.set_page_config(layout="wide")
     # Initialize session state variables
     if 'full_transcription' not in st.session_state:
         st.session_state.full_transcription = None
+    if 'formatted_transcription' not in st.session_state:
+        st.session_state.formatted_transcription = None
     if 'audio_data' not in st.session_state:
         st.session_state.audio_data = None
     if 'info' not in st.session_state:
@@ -369,14 +385,29 @@ def main():
     transcriber, vad_model = initialize_models()
     
     # Call setup_ui() to get UI element values
-    video_url, language, batch_size, transcribe_option, download_audio_option, download_video_option, process_button, vad_sensitivity, audio_format, video_format = setup_ui()
+    video_url, language, batch_size, transcribe_option, download_audio_option, download_video_option, process_button, vad_sensitivity, audio_format, video_format, format_option = setup_ui()
 
-    # transcription_output = st.empty()
+    # Validate options
+    if not transcribe_option and not download_audio_option and not download_video_option and not format_option:
+        st.error("Please select at least one option.")
+        return
+    if format_option and not transcribe_option:
+        st.error("Please select the transcription option to format the transcript.")
+        return
+
+    transcription_output = st.empty()
+    formatted_transcription_output = st.empty()
     if st.session_state.full_transcription:
-        st.text_area("Transcription:", value=st.session_state.full_transcription, height=300, key=random.random())
-
+        transcription_output.text_area("Transcription:", value=st.session_state.full_transcription, height=300, key=uuid.uuid4())
+        if format_option:
+          if st.session_state.formatted_transcription:
+            formatted_transcription_output.text_area("Formatted Transcription:", value=st.session_state.formatted_transcription, height=300, key=uuid.uuid4())
+          else:
+            formatted_transcription_output.text_area("Formatted Transcription:", value="No formatting was done on this transcription", height=300, key=uuid.uuid4())
+        
     if process_button:
         st.session_state.full_transcription = None
+        st.session_state.formatted_transcription = None
         st.session_state.audio_data = None
         st.session_state.info = None
         st.session_state.video_data = None
@@ -386,44 +417,63 @@ def main():
         if not video_url:
             st.error("Please enter a YouTube video link.")
             return
+        
+        # Handle language auto-detection
+        selected_language = language.lower() if language != "Auto-Detect" else None
 
         if transcribe_option:
-            st.session_state.full_transcription, st.session_state.formatted_transcription, st.session_state.audio_data, st.session_state.audio_format, st.session_state.info = process_transcription(video_url, vad_sensitivity, batch_size, transcriber, vad_model, audio_format, language)
+            st.session_state.full_transcription, st.session_state.audio_data, st.session_state.audio_format, st.session_state.info = process_transcription(video_url, vad_sensitivity, batch_size, transcriber, vad_model, audio_format, selected_language)
             if st.session_state.full_transcription:
-                st.text_area("Transcription:", value=st.session_state.full_transcription, height=300, key=random.random())
-            if st.session_state.formatted_transcription:
-                st.text_area("Formatted Transcription:", value=st.session_state.formatted_transcription, height=300, key=random.random())
-
+                transcription_output.text_area("Transcription:", value=st.session_state.full_transcription, height=300, key=uuid.uuid4())
+                if format_option:
+                  st.session_state.formatted_transcription = format_transcript(st.session_state.full_transcription)
+                  formatted_transcription_output.text_area("Formatted Transcription:", value=st.session_state.formatted_transcription, height=300, key=uuid.uuid4())
+                else:
+                  st.session_state.formatted_transcription = None
 
         if download_audio_option:
-            if st.session_state.audio_data is None or st.session_state.audio_format is None or st.session_state.info is None:
+            if st.session_state.audio_data is None or st.session_state.audio_format is None:
                 st.session_state.audio_data, st.session_state.audio_format, st.session_state.info = download_and_convert_audio(video_url, audio_format)
 
         if download_video_option:
             st.session_state.video_data, st.session_state.video_filename, st.session_state.info = download_video(video_url, video_format)
+            # Handle cases where st.session_state.info is None due to download errors
+            if st.session_state.info is None:
+                st.error("Could not retrieve video information. Please check the video URL and try again.")
+                # Reset video_data and video_filename to prevent further errors
+                st.session_state.video_data = None
+                st.session_state.video_filename = None
 
     # Download button logic (moved after setup_ui() call)
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.session_state.full_transcription and transcribe_option:
             st.download_button(
                 label="Download Transcription (TXT)",
                 data=st.session_state.full_transcription,
-                file_name=f"{st.session_state.info['id']}_transcription.txt",
+                file_name=f"{st.session_state.info['id'] if st.session_state.info else 'transcription'}.txt",
+                mime="text/plain"
+            )
+    with col2:
+        if st.session_state.formatted_transcription and format_option:
+            st.download_button(
+                label="Download Formatted Transcription (TXT)",
+                data=st.session_state.formatted_transcription,
+                file_name=f"{st.session_state.info['id'] if st.session_state.info else 'formatted_transcription'}.txt",
                 mime="text/plain"
             )
 
-    with col2:
+    with col3:
         # Now download_audio_option is defined
         if st.session_state.audio_data is not None and download_audio_option:
             st.download_button(
                 label=f"Download Audio ({st.session_state.audio_format})",
                 data=st.session_state.audio_data,
-                file_name=f"{st.session_state.info['id']}.{st.session_state.audio_format}",
+                file_name=f"{st.session_state.info['id'] if st.session_state.info else 'audio'}.{st.session_state.audio_format}",
                 mime=f"audio/{st.session_state.audio_format}"
             )
 
-    with col3:
+    with col4:
         if st.session_state.video_data is not None and download_video_option:
             st.download_button(
                 label="Download Video",
