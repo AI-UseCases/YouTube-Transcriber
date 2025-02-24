@@ -5,3 +5,4 @@ streamlit==1.40.2
 torch==2.5.1
 transformers==4.46.3
 yt_dlp==2024.12.6
+litellm==1.61.15

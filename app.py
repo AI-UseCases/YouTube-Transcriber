@@ -344,7 +344,7 @@ def download_video(video_url, video_format):
 def format_transcript(input_transcription):
     """Formats the transcription using the Gemini large language model."""
 
-    # os.environ["GEMINI_API_KEY"] = "..."
+    os.environ["GEMINI_API_KEY"] = "AIzaSyBWmOE2XMVpiHuUI4YzgOVzUoENfDeXe8s"
 
     sys_prompt = """
     *   Format the provided video transcription as a polished piece of written text.
